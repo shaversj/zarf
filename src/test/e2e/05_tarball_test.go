@@ -309,8 +309,12 @@ func TestPackageTarballDirectoryStructure(t *testing.T) {
 			// |-- components
 			// |   |-- test-component-1
 			// |   |   |-- charts
-			// |   |   |   |-- podinfo-compose-6.4.0.tgz
-			// |   |   |   `-- podinfo-compose-two-6.4.0.tgz
+			// |   |   |   |-- podinfo-compose-6.4.0
+			// |   |   |   |   `-- podinfo
+			// |   |   |   |       `-- Chart.yaml
+			// |   |   |   `-- podinfo-compose-two-6.4.0
+			// |   |   |       `-- podinfo
+			// |   |   |           `-- Chart.yaml
 			// |   |   |-- data
 			// |   |   |   |-- 0
 			// |   |   |   |   `-- service.yaml
@@ -347,8 +351,12 @@ func TestPackageTarballDirectoryStructure(t *testing.T) {
 			// |   |       `-- podinfo-compose-two-6.4.0-0
 			// |   `-- test-component-2
 			// |       |-- charts
-			// |       |   |-- podinfo-compose-6.4.0.tgz
-			// |       |   `-- podinfo-compose-two-6.4.0.tgz
+			// |       |   |-- podinfo-compose-6.4.0
+			// |       |   |   `-- podinfo
+			// |       |   |       `-- Chart.yaml
+			// |       |   `-- podinfo-compose-two-6.4.0
+			// |       |       `-- podinfo
+			// |       |           `-- Chart.yaml
 			// |       |-- data
 			// |       |   |-- 0
 			// |       |   |   `-- service.yaml
@@ -420,12 +428,25 @@ func TestPackageTarballDirectoryStructure(t *testing.T) {
 				fi, err := os.Stat(charts)
 				require.NoError(t, err, "[%s] charts dir error", comp)
 				require.True(t, fi.IsDir(), "[%s] charts dir is not a directory", comp)
-				for _, f := range []string{
-					"podinfo-compose-6.4.0.tgz",
-					"podinfo-compose-two-6.4.0.tgz",
+				for _, chart := range []string{
+					"podinfo-compose-6.4.0",
+					"podinfo-compose-two-6.4.0",
 				} {
-					_, err := os.Stat(filepath.Join(charts, f))
-					require.NoError(t, err, "[%s] missing chart %s", comp, f)
+					require.NoFileExists(
+						t,
+						filepath.Join(charts, chart+".tgz"),
+						"[%s] chart archive %s should have been removed",
+						comp,
+						chart,
+					)
+
+					require.FileExists(
+						t,
+						filepath.Join(charts, chart, "podinfo", "Chart.yaml"),
+						"[%s] chart %s was not extracted",
+						comp,
+						chart,
+					)
 				}
 
 				// data

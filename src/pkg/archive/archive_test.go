@@ -7,6 +7,7 @@ package archive
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"os"
 	"path/filepath"
@@ -75,6 +76,20 @@ func tarBytes(t *testing.T, entries map[string]string) []byte {
 		require.NoError(t, err)
 	}
 	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
+
+// tgzBytes builds a gzip-compressed tar archive in memory from the given name->content entries.
+func tgzBytes(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+
+	_, err := writer.Write(tarBytes(t, entries))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
 	return buf.Bytes()
 }
 
@@ -511,4 +526,73 @@ func TestDecompressOptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecompressStreamUnarchiveAll(t *testing.T) {
+	t.Parallel()
+
+	chartArchive := tgzBytes(t, map[string]string{
+		"podinfo/Chart.yaml": "name: podinfo",
+	})
+	fileArchive := tgzBytes(t, map[string]string{
+		"preserved.txt": "preserved content",
+	})
+
+	componentArchive := tarBytes(t, map[string]string{
+		"example/charts/podinfo-1.0.0.tgz": string(chartArchive),
+		"example/files/0/preserved.tgz":    string(fileArchive),
+	})
+	packageArchive := tarBytes(t, map[string]string{
+		"components/example.tar": string(componentArchive),
+	})
+
+	outDir := t.TempDir()
+	err := DecompressStream(
+		t.Context(),
+		bytes.NewReader(packageArchive),
+		outDir,
+		DecompressOpts{
+			Extractor:    archives.Tar{},
+			UnarchiveAll: true,
+		},
+	)
+	require.NoError(t, err)
+
+	t.Run("extracts component Helm chart archives", func(t *testing.T) {
+		chartPath := filepath.Join(
+			outDir,
+			"components",
+			"example",
+			"charts",
+			"podinfo-1.0.0.tgz",
+		)
+		require.NoFileExists(t, chartPath)
+
+		require.FileExists(t, filepath.Join(
+			outDir,
+			"components",
+			"example",
+			"charts",
+			"podinfo-1.0.0",
+			"podinfo",
+			"Chart.yaml",
+		))
+	})
+
+	t.Run("preserves component file archives", func(t *testing.T) {
+		filePath := filepath.Join(
+			outDir,
+			"components",
+			"example",
+			"files",
+			"0",
+			"preserved.tgz",
+		)
+		require.FileExists(t, filePath)
+		require.NoDirExists(t, strings.TrimSuffix(filePath, extensionTgz))
+
+		preserved, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		require.Equal(t, fileArchive, preserved)
+	})
 }

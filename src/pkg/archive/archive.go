@@ -294,11 +294,11 @@ func extract(ctx context.Context, input io.Reader, dst string, opts DecompressOp
 	return nil
 }
 
-// nestedUnarchive walks dst and unarchives each .tar file it finds.
+// nestedUnarchive walks dst and unarchives each .tar file and each .tgz Helm chart in a component.
 // It uses WalkDir so that symlinks are visible via d.Type() and skipped,
 // preventing the walk from following symlinks into directories.
 func nestedUnarchive(ctx context.Context, dst string) error {
-	return filepath.WalkDir(dst, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(dst, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -310,6 +310,47 @@ func nestedUnarchive(ctx context.Context, dst string) error {
 			outDir = strings.TrimSuffix(path, extensionTar)
 		}
 		if err := unarchive(ctx, path, outDir); err != nil {
+			return fmt.Errorf(lang.ErrUnarchive, path, err)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf(lang.ErrRemoveFile, path, err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return unarchiveComponentHelmCharts(ctx, dst)
+}
+
+// unarchiveComponentHelmCharts walks dst and unarchives each .tgz file in a
+// component's charts directory, preserving archives supplied through component files.
+func unarchiveComponentHelmCharts(ctx context.Context, dst string) error {
+	chartPattern := filepath.Join("components", "*", "charts", "*"+extensionTgz)
+
+	return filepath.WalkDir(dst, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+
+		relative, err := filepath.Rel(dst, path)
+		if err != nil {
+			return err
+		}
+
+		matched, err := filepath.Match(chartPattern, relative)
+		if err != nil {
+			return err
+		}
+		if !matched {
+			return nil
+		}
+
+		outDir := strings.TrimSuffix(path, extensionTgz)
+		if err := Decompress(ctx, path, outDir, DecompressOpts{}); err != nil {
 			return fmt.Errorf(lang.ErrUnarchive, path, err)
 		}
 		if err := os.Remove(path); err != nil {
